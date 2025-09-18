@@ -10,19 +10,32 @@ export async function POST(request: NextRequest) {
 
   let messages: UIMessage[];
   if (incomingMessages && incomingMessages.length > 0) {
-    messages = incomingMessages.map((m: any) => {
-      // Ensure any text parts have non-empty text
-      if (Array.isArray(m.parts)) {
-        m.parts = m.parts.map((p: any) =>
-          p?.type === "text" && typeof p?.text === "string" && p.text.trim().length > 0
-            ? p
-            : p?.type === "text"
-              ? { ...p, text: "" }
-              : p,
-        );
-      }
-      return m as UIMessage;
-    });
+    // Only forward the latest user message to the task
+    const lastUser = [...incomingMessages].reverse().find((m: any) => m?.role === "user");
+    const textFromParts = Array.isArray((lastUser as any)?.parts)
+      ? (lastUser as any).parts
+          .filter((p: any) => p?.type === "text" && typeof p?.text === "string")
+          .map((p: any) => p.text as string)
+          .join("\n")
+      : undefined;
+    const lastUserText: string | undefined =
+      (typeof (lastUser as any)?.content === "string" ? (lastUser as any).content : undefined) || textFromParts;
+
+    if (!lastUserText || lastUserText.trim().length === 0) {
+      return NextResponse.json({ error: "Latest user message is empty" }, { status: 400 });
+    }
+
+    messages = [
+      {
+        role: "user",
+        parts: [
+          {
+            type: "text",
+            text: lastUserText.trim(),
+          },
+        ],
+      } as any,
+    ];
   } else if (prompt && prompt.trim().length > 0) {
     messages = [
       {
