@@ -73,26 +73,37 @@ function RunStreamItem({ runId, token, idx }: { runId: string; token: string; id
     enabled: true,
   });
 
-  const text = useMemo(() => {
+  const { text, webSources, computerImage } = useMemo(() => {
     const parts = (streams?.gigastream as unknown[] | undefined) ?? [];
     let acc = "";
+    let sources: Array<{ title?: string; url?: string; snippet?: string }> = [];
+    let image: string | undefined;
     for (const raw of parts) {
       let p: any = raw;
       if (typeof raw === "string") {
         try { p = JSON.parse(raw); } catch { acc += raw; continue; }
       }
-      if (p && typeof p === "object" && "type" in p) {
-        const t = p.type as string;
-        if (t === "text-delta") {
-          const delta: string = p.delta ?? p.textDelta ?? p.text ?? "";
-          if (delta) acc += delta;
-        } else if (t === "text") {
-          if (typeof p.text === "string" && p.text.length) acc = p.text;
+      if (!p || typeof p !== "object" || !("type" in p)) continue;
+      const t = p.type as string;
+      if (t === "text-delta") {
+        const delta: string = p.delta ?? p.textDelta ?? p.text ?? "";
+        if (delta) acc += delta;
+      } else if (t === "text") {
+        if (typeof p.text === "string" && p.text.length) acc = p.text;
+      } else if (t === "tool-result") {
+        const toolName: string | undefined = (p as any).toolName;
+        const out = (p as any).result ?? (p as any).output;
+        if (toolName === "webSearch") {
+          if (Array.isArray(out)) sources = out as any[];
+          else if (out && typeof out === "object" && Array.isArray(out.sources)) sources = out.sources as any[];
+        } else if (toolName === "computer") {
+          if (out && typeof out === "object" && out.type === "image" && typeof out.data === "string") {
+            image = out.data as string;
+          }
         }
-        // ignore other chunk types
       }
     }
-    return acc.trim();
+    return { text: acc.trim(), webSources: sources, computerImage: image };
   }, [streams?.gigastream]);
 
   const anchorRef = useRef<HTMLDivElement | null>(null);
@@ -114,7 +125,29 @@ function RunStreamItem({ runId, token, idx }: { runId: string; token: string; id
   return createPortal(
     <div className="aui-assistant-message-root relative mx-auto w-full max-w-[var(--thread-max-width)] animate-in py-2 duration-200 fade-in slide-in-from-bottom-1">
       <div className="aui-assistant-message-content mx-2 leading-7 break-words text-foreground rounded-3xl bg-muted px-5 py-2.5">
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap m-0">{text}</pre>
+        {text && <pre className="max-h-64 overflow-auto whitespace-pre-wrap m-0">{text}</pre>}
+        {webSources && webSources.length > 0 && (
+          <div className="mt-2 space-y-2">
+            {webSources.map((s, i) => (
+              <div key={i} className="rounded-md border bg-background p-2">
+                <div className="truncate text-sm font-medium">
+                  {s.url ? (
+                    <a href={s.url} target="_blank" rel="noreferrer" className="underline">
+                      {s.title || s.url}
+                    </a>
+                  ) : (
+                    s.title || "(no title)"
+                  )}
+                </div>
+                {s.url && <div className="truncate text-xs text-muted-foreground">{s.url}</div>}
+                {s.snippet && <div className="mt-1 text-sm leading-5">{s.snippet}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+        {computerImage && (
+          <img alt="screenshot" className="mt-2 aspect-[1024/768] w-full rounded-md border" src={`data:image/png;base64,${computerImage}`} />
+        )}
       </div>
     </div>,
     container

@@ -26,6 +26,8 @@ import {
 } from "@/components/assistant-ui/attachment";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
+import { WebSearchTool } from "@/components/assistant-ui/tools/web-search";
+import { ComputerTool } from "@/components/assistant-ui/tools/computer";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -248,7 +250,7 @@ const AssistantMessage: FC = () => {
           <MessagePrimitive.Parts
             components={{
               Text: MarkdownText,
-              tools: { Fallback: ToolFallback },
+              tools: { Fallback: ToolFallback, by_name: { webSearch: WebSearchTool, computer: ComputerTool } },
             }}
           />
           <MessageError />

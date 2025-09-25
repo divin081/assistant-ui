@@ -1,6 +1,6 @@
 import { metadata, task, wait } from "@trigger.dev/sdk/v3";
 import { anthropic } from "@ai-sdk/anthropic";
-import { streamText, UIMessage, convertToModelMessages } from "ai";
+import { streamText, UIMessage } from "ai";
 import { computerTool, webSearchTool, webAnswerTool } from "@/lib/e2b/tools";
 import { killDesktop } from "@/lib/e2b/utils";
 import { prunedMessages } from "@/lib/utils";
