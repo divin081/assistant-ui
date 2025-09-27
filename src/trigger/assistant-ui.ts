@@ -1,6 +1,6 @@
 import { metadata, task, wait } from "@trigger.dev/sdk/v3";
 import { anthropic } from "@ai-sdk/anthropic";
-import { streamText, UIMessage } from "ai";
+import { streamText, UIMessage, stepCountIs } from "ai";
 import { computerTool, webSearchTool, webAnswerTool } from "@/lib/e2b/tools";
 import { killDesktop } from "@/lib/e2b/utils";
 import { prunedMessages } from "@/lib/utils";
@@ -9,7 +9,7 @@ export const assistantUiTask = task({
   id: "assistant-ui-starter",
   description: "Assistant UI Starter",
   // Set an optional maxDuration to prevent tasks from running indefinitely
-  maxDuration: 600, // Stop executing after 300 secs (5 mins) of compute
+  maxDuration: 900, // Stop executing after 300 secs (5 mins) of compute
   run: async (payload: {
     messages: UIMessage[];
     sandboxId: string;
@@ -17,6 +17,7 @@ export const assistantUiTask = task({
      const { messages, sandboxId } = payload;
 
     metadata.set("status", "processing");
+    metadata.set("sandboxId", sandboxId);
     
     try {
       // Update RTest with current task run ID for persistence (disabled: model not available here)
@@ -62,12 +63,16 @@ EVALUATION CRITERIA:
 -file operations, coding tasks, web browsing, software installation, system administration, or tasks that specifically require desktop interaction.
 
 
+!!!IMPORTANT!!!:
+STREAMING STRUCTURE:
+text-only: only use for text-only responses.
+(events: text-delta, finish)
 
-Tools overview:
-- computer: use only for GUI-required actions.
-- webSearch: returns sources (title, url, snippet).
-- webAnswer: generate concise answer with citation; prefer after webSearch.
-`,
+webSearch: give the reasoning text, then the webSearch tool call and result
+(events: text-delta, tool-call, tool-result, text-delta, finish)
+
+computer: give the reasoning text, then the computer tools call and result needed for the task and a final text-only response.(multiple computer tools calls may be needed depending on the task)
+(events: text-delta, tool-call, tool-result[x1, x2, x3, ...], text-delta, finish)`,
         messages: prunedMessages(messages).map((m: any) => ({
           role: m.role,
           content: (m.parts || [])
@@ -87,7 +92,8 @@ Tools overview:
             },
           },
         },
-        // maxTokens not supported in this call signature
+        stopWhen: stepCountIs(200),
+        maxOutputTokens: 8000,
       });
 
     
@@ -189,15 +195,14 @@ Tools overview:
    // Update status to failed
    metadata.set("status", "failed");
    metadata.set("error", error instanceof Error ? error.message : "Unknown error");
-
-   // Cleanup sandbox on error
+   throw error;
+ } finally {
+   // Always cleanup sandbox after the stream ends
    try {
      await killDesktop(sandboxId);
    } catch (cleanupError) {
      console.error("Failed to cleanup sandbox:", cleanupError);
    }
-
-   throw error;
  }
 },
 }); 

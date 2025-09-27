@@ -2,11 +2,23 @@ import {NextRequest, NextResponse} from "next/server";
 import { UIMessage } from "ai";
 import { assistantUiTask } from "@/src/trigger/assistant-ui";
 import { auth } from "@trigger.dev/sdk/v3";
+import { getDesktopURL } from "@/lib/e2b/utils";
 
+async function createSandbox(): Promise<{ sandboxID: string; streamURL: string }> {
+  const { streamUrl, id } = await getDesktopURL();
+  return {
+    sandboxID: id,
+    streamURL: streamUrl,
+  };
+}
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const prompt: string | undefined = typeof body?.prompt === "string" ? body.prompt : undefined;
   const incomingMessages: UIMessage[] | undefined = Array.isArray(body?.messages) ? body.messages : undefined;
+
+  // Hoisted sandbox info so it's accessible later when setting cookies
+  let sandboxID: string | undefined;
+  let streamURL: string | undefined;
 
   let messages: UIMessage[];
   if (incomingMessages && incomingMessages.length > 0) {
@@ -24,6 +36,8 @@ export async function POST(request: NextRequest) {
     if (!lastUserText || lastUserText.trim().length === 0) {
       return NextResponse.json({ error: "Latest user message is empty" }, { status: 400 });
     }
+// Create sandbox and get IDs
+    ({ sandboxID, streamURL } = await createSandbox());
 
     messages = [
       {
@@ -52,10 +66,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Provide either non-empty prompt or messages" }, { status: 400 });
   }
 
+  // Ensure a sandbox exists for this request and capture its id/stream
+  if (!sandboxID || !streamURL) {
+    try {
+      ({ sandboxID, streamURL } = await createSandbox());
+    } catch (e) {
+      console.error("Failed to create sandbox:", e);
+    }
+  }
+
   // Trigger a fresh task run per request (per user message)
   const payload = {
     messages,
-    sandboxId: "desktop",
+    sandboxId: sandboxID || "desktop",
   };
 
   console.log("Triggering task with payload:", JSON.stringify(payload, null, 2));
@@ -81,6 +104,13 @@ export async function POST(request: NextRequest) {
       res.cookies.set("td_run", runId, { path: "/", maxAge: 60 * 15 });
       res.cookies.set("td_token", publicAccessToken, { path: "/", maxAge: 60 * 15 });
     }
+    // If a sandbox was created earlier in this request, persist its details for the iframe
+    try {
+      if (typeof sandboxID === "string" && typeof streamURL === "string") {
+        res.cookies.set("desktop_id", sandboxID, { path: "/", maxAge: 60 * 15 });
+        res.cookies.set("desktop_stream", streamURL, { path: "/", maxAge: 60 * 15 });
+      }
+    } catch {}
     return res;
   } catch (error) {
     console.error("Failed to trigger task or create token:", error);

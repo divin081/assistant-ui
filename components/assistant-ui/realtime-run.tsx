@@ -73,11 +73,13 @@ function RunStreamItem({ runId, token, idx }: { runId: string; token: string; id
     enabled: true,
   });
 
-  const { text, webSources, computerImage } = useMemo(() => {
+  const { text, webSources, computerBlocks } = useMemo(() => {
     const parts = (streams?.gigastream as unknown[] | undefined) ?? [];
     let acc = "";
     let sources: Array<{ title?: string; url?: string; snippet?: string }> = [];
-    let image: string | undefined;
+    type CompBlock = { action?: string; detail?: string; image?: string; state: 'call'|'result' };
+    const compBlocks: CompBlock[] = [];
+    const pending: Record<string, number> = {};
     for (const raw of parts) {
       let p: any = raw;
       if (typeof raw === "string") {
@@ -97,13 +99,52 @@ function RunStreamItem({ runId, token, idx }: { runId: string; token: string; id
           if (Array.isArray(out)) sources = out as any[];
           else if (out && typeof out === "object" && Array.isArray(out.sources)) sources = out.sources as any[];
         } else if (toolName === "computer") {
-          if (out && typeof out === "object" && out.type === "image" && typeof out.data === "string") {
-            image = out.data as string;
+          const img = out && typeof out === "object" && out.type === "image" && typeof out.data === "string" ? out.data as string : undefined;
+          const id = (p as any).toolCallId as string | undefined;
+          const idx = id && pending[id] !== undefined ? pending[id] : undefined;
+          if (idx !== undefined) {
+            compBlocks[idx] = { ...compBlocks[idx], image: img, state: 'result' };
+            delete pending[id!];
+          } else {
+            compBlocks.push({ image: img, state: 'result' });
           }
+        }
+      } else if (t === "tool-call") {
+        const toolName: string | undefined = (p as any).toolName;
+        if (toolName === "computer") {
+          const input = (p as any).args ?? (p as any).input;
+          let action: string | undefined;
+          let detail: string | undefined;
+          try {
+            const a = typeof input === 'string' ? JSON.parse(input) : input;
+            action = a?.action;
+            const c = Array.isArray(a?.coordinate) ? a.coordinate as [number,number] : undefined;
+            const textArg = typeof a?.text === 'string' ? a.text : undefined;
+            const dur = typeof a?.duration === 'number' ? a.duration : undefined;
+            const amt = typeof a?.scroll_amount === 'number' ? a.scroll_amount : undefined;
+            const dir = typeof a?.scroll_direction === 'string' ? a.scroll_direction : undefined;
+            switch (action) {
+              case 'left_click':
+              case 'right_click':
+              case 'double_click':
+              case 'mouse_move':
+                detail = c ? `(${c[0]}, ${c[1]})` : undefined; break;
+              case 'type':
+              case 'key':
+                detail = textArg; break;
+              case 'wait':
+                detail = dur ? `${dur}s` : undefined; break;
+              case 'scroll':
+                detail = dir && amt ? `${dir} by ${amt}` : undefined; break;
+            }
+          } catch {}
+          const idx = compBlocks.push({ action, detail, state: 'call' }) - 1;
+          const id = (p as any).toolCallId as string | undefined;
+          if (id) pending[id] = idx;
         }
       }
     }
-    return { text: acc.trim(), webSources: sources, computerImage: image };
+    return { text: acc.trim(), webSources: sources, computerBlocks: compBlocks };
   }, [streams?.gigastream]);
 
   const anchorRef = useRef<HTMLDivElement | null>(null);
@@ -122,8 +163,10 @@ function RunStreamItem({ runId, token, idx }: { runId: string; token: string; id
 
   if (!container) return null;
 
+  
+
   return createPortal(
-    <div className="aui-assistant-message-root relative mx-auto w-full max-w-[var(--thread-max-width)] animate-in py-2 duration-200 fade-in slide-in-from-bottom-1">
+    <div className="aui-assistant-message-root relative mx-auto w-full max-w-[var(--thread-max-width)] animate-in py-2 duration-200 fade-in slide-in-from-bottom-1 overflow-y-auto max-h-[400px]">
       <div className="aui-assistant-message-content mx-2 leading-7 break-words text-foreground rounded-3xl bg-muted px-5 py-2.5">
         {text && <pre className="max-h-64 overflow-auto whitespace-pre-wrap m-0">{text}</pre>}
         {webSources && webSources.length > 0 && (
@@ -145,8 +188,21 @@ function RunStreamItem({ runId, token, idx }: { runId: string; token: string; id
             ))}
           </div>
         )}
-        {computerImage && (
-          <img alt="screenshot" className="mt-2 aspect-[1024/768] w-full rounded-md border" src={`data:image/png;base64,${computerImage}`} />
+        {computerBlocks && computerBlocks.length > 0 && (
+          <div className="mt-2 space-y-2">
+            {computerBlocks.map((b, i) => (
+              <div key={i} className="rounded-md border bg-background p-2">
+                <div className="text-sm font-medium flex items-center gap-2">
+                  <span>{b.action || 'computer'}</span>
+                  {b.detail && <span className="text-xs text-muted-foreground">{b.detail}</span>}
+                  <span className="ml-auto text-xs text-muted-foreground">{b.state}</span>
+                </div>
+                {b.image && (
+                  <img alt="screenshot" className="mt-2 aspect-[1024/768] w-full rounded-md border" src={`data:image/png;base64,${b.image}`} />
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>,
